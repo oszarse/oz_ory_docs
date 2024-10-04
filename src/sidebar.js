@@ -693,6 +693,7 @@ module.exports = {
     "api/eventual-consistency",
     "concepts/cache",
     "reference/api",
+    "concepts/pagination",
     {
       type: "link",
       label: "Search",

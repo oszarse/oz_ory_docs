@@ -1,0 +1,254 @@
+---
+id: pagination
+title: API Pagination
+sidebar_label: API Pagination
+keywords:
+  - API pagination
+  - REST pagination
+  - efficient data retrieval
+  - performance optimization
+  - large datasets
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+# API Pagination
+
+Ory Network allows you to request large sets of data in small, manageable chunks to improve the performance of accessing data.
+
+Requesting large amounts of data in a single request can put a lot of strain on server-side and client-side applications. This
+can lead to long loading times and negative user experiences. Instead of requesting all of your data all at once, you can use
+API pagination to limit the number of results from a single request. You can then send multiple requests to get as many chunks
+(or pages) of data as you need, when you need them.
+
+Using pagination has several benefits:
+
+- **Shorter response time**: Requesting a small amount of data that you need at the moment can be faster than getting the whole
+  dataset and filtering it after.
+- **Reduced loads**: Processing smaller chunks of data at a time requires fewer resources for server-side and client-side
+  applications.
+- **Scalability**: Accessing larger datasets with the same-sized chunks of data doesn't require you to expand or upgrade
+  your available resources.
+
+To help ensure smooth data transactions, many of our API endpoints for data retrieval support pagination.
+
+## Types of Pagination
+
+The API's that support pagination use either token pagination or offset pagination.
+
+Note: The parameter names for each pagination type are the same across all API's that support that pagination type. This
+makes it easy to search and find API's that support pagiantion.
+
+### Token pagination
+
+The most common pagination technique in our API's uses tokens to get chunks of data. With token pagination, each chunk of
+data also include a string of characters (or token) that you use to get the next chunk.
+
+![Token pagination](./_static/pagination/token_pagination_diagram.png)
+
+You start this process by sending an initial request, specifying the chunk size with the ``page_size`` parameter:
+
+```
+curl --location 'https://YOUR-PROJECT-SLUG.projects.oryapis.com/admin/identities?page_size=5' \
+--header 'Authorization: Bearer YOUR-PROJECT-API-TOKEN' \
+--header 'Accept: application/json'
+```
+
+The response includes the first chunk of data as well as the ``link`` HTTP
+header, which contains the token for the next chunk:
+
+```
+'link': '</admin/identities?page_size=5&page_token=00000000-0000-0000-0000-000000000000>; rel="first",</admin/identities?page_size=5&page_token=1cd620f2-df29-48f3-b540-149ba3829104>; rel="next"'
+```
+
+In this case, ``1cd620f2-df29-48f3-b540-149ba3829104`` is the token. To get the next chunk of data, you pass that token to the
+``page_token`` parameter of your next request. Each following response includes a new token for the next chunk.
+
+You can continue this process until the last chunk of data, where the ``link`` header doesn't contain a token. The lack of
+a token is an indicator that you've reached the end of the dataset and you can't request another chunk.
+
+Note: The chunk size specified with the ``page_size`` parameter doesn't need to be the same for every request.
+
+### Offset pagination
+
+A less common pagination technique used in our API's returns a specified number of records, starting at a specified location
+in the list of records. With offset pagination, you use the ``offset`` parameter to select a starting point in the list of
+objects and the ``limit`` parameter to specify the size of the chunk. For example:
+
+```
+curl -- location 'https://www.ory.sh/rules?offset=20?limit=5' \
+--header 'Accept: application/json'
+```
+
+One drawback of offset pagination is that it requires additional error handling, as it's possible to specify an offset that's
+greater than the number of records.
+
+## Best Practices
+
+Implmenting pagination can be a relatively straightforward process. However, there are several options and techniques that you
+can consider for your use case.
+
+### Filtering
+
+You can further improve the efficiency of pagination by first filtering the data you want to retrieve. Many API's have
+parameters that allow you to specify the conditions for the data you request. This can reduce the total amount of data,
+which means fewer requests or smaller chunks.
+
+### Optimizing chunk size and number of requests
+
+To get a certain amount of data, you can either make more requests with smaller chunks or fewer requests with larger chunks.
+Both approaches offer pros and cons, and ultimately, the better option depends on your use case.
+
+If your primary concern is response time, smaller chunks and more requests might be the faster option. If you're worried about
+exceeding the rate limits for your Ory Network org, larger chunks reduce the number of requests you need to make
+in a given time.
+
+### Error handling
+
+There are several types of errors to consider when using pagination:
+
+- **Rate Limits**: If the number of requests in a given timespan exceeds the rate limit, the application must wait
+  for the rate limit to clear before retrying the last request. Note that some endpoints do not return the standard
+  ``HTTP 429`` error code, and no error is raised. In these cases, check whether the response includes a ``link`` header. If
+  there's no ``link`` header, that request exceeded the rate limit.
+- **Bad Request**: If the token is invalid, the application must either stop data retrieval or attempt to get the last
+  token before making another request.
+
+## Code Examples
+
+The following example uses an Ory SDK to access all of the identities in a project using token pagination. After an inital
+request for a specified number of users, the example gets the token for the next chunk of users. This continues until no token
+is provided.
+
+Note: The ``link`` response header is a string, and the page token for the next chunk needs to be extracted from that string.
+
+<Tabs>
+<TabItem value="python" label="Python">
+
+```python
+import ory_client
+from ory_client.models.identity import Identity
+from ory_client.rest import ApiException
+from pprint import pprint
+import re
+import time
+
+# Provide your Ory Network project URI and API key
+configuration = ory_client.Configuration(
+    host = "https://YOUR-PROJECT-SLUG.projects.oryapis.com",
+    access_token = "YOUR-PROJECT-API-TOKEN"
+)
+
+# Set conditions for first request
+more_pages = True
+next_page_token = ""
+
+with ory_client.ApiClient(configuration) as api_client:
+        # Create an instance of the API class
+        api_instance = ory_client.IdentityApi(api_client)
+
+        # Set the number of identities per page
+        page_size = 5
+
+        # Get pages of identities until none remaining
+        while more_pages:
+            try:
+                api_response = api_instance.list_identities_without_preload_content(page_size=page_size, page_token=next_page_token)
+                try:
+                    # Get link header that contains the page tokens
+                    link_header = api_response.headers["link"]
+
+                    # Extract the page tokens from link header
+                    page_tokens = re.findall(r'&page_token=(.*?)>', link_header)
+
+                    # Check if there's a next page token
+                    if len(page_tokens) == 1:
+                        # If no next page token, exit loop
+                        more_pages = False
+
+                    else:
+                        # If next page token exists, update variable for next loop
+                        next_page_token = page_tokens[1]
+
+                    # Return or print identities
+                    pprint(api_response.data)
+
+                except:
+                    # If link header doesn't exist, the rate limit was reached
+                    print("Rate limit reached. Waiting 60 seconds before continuing.")
+                    # Wait 60 seconds to clear requests-per-minute limit
+                    time.sleep(60)
+
+            except Exception as e:
+                print("Exception when calling IdentityApi->list_identities: %s\n" % e)
+```
+
+</TabItem>
+<TabItem value="ruby" label="Ruby">
+
+```ruby
+require 'time'
+require 'ory-client'
+
+# Provide your Ory Network project URI and API key
+OryClient.configure do |config|
+  config.host = "https://YOUR-PROJECT-SLUG.projects.oryapis.com",
+  config.access_token = "YOUR-PROJECT-API-TOKEN"
+end
+
+# Create an instance of the API class
+api_instance = OryClient::IdentityApi.new
+
+# Set the number of identities per page
+page_size = 5
+
+# Set conditions for the first request
+more_pages = true
+next_page_token = ""
+
+# Get pages of identities until none remaining
+while more_pages
+	begin
+        # Set page size and the token for the next page
+		opts = {
+			page_size: page_size,
+			page_token: next_page_token
+		}
+
+        # Get the identities on the page and HTTP request headers
+		data, status_code, headers = api_instance.list_identities_with_http_info(opts)
+
+        # Extract the page tokens from the link header
+		page_tokens = headers["link"].scan(/&page_token=(.*?)>/).flatten
+
+        # Check if there's a next page token
+		if page_tokens.length == 1
+            # If no next page token, exit loop
+			more_pages = false
+		else
+            # If next page token exists, update variable for next loop
+			next_page_token = page_tokens[1]
+		end
+
+        # Print the identities on the page
+		p data
+
+	rescue OryClient::ApiError => e
+		case e.code
+		when 429
+			puts "Rate limit reached. Waiting 60 seconds before continuing."
+			sleep(60)
+		else
+			puts "Error when calling IdentityApi->list_identities: #{e}"
+		end
+	end
+end
+```
+
+</TabItem>
+</Tabs>
+
+
+
+

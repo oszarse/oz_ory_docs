@@ -44,6 +44,7 @@ const referenceSidebar: ExtendSidebar = [
           "api/eventual-consistency",
           "guides/custom-domains",
           "console/usage-billing",
+          "concepts/pagination"
         ],
       },
       {
